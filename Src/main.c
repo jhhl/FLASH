@@ -172,7 +172,9 @@ enum {
   wave_HardPulse,
   wave_SoftPulse,
   wave_HardSyncSine,
-  wave_HardSyncSaw
+  wave_HardSyncSaw,
+  // jhhl
+  wave_OddHarms
 };
 
 enum {
@@ -524,6 +526,34 @@ void setWaveform(uint8_t id, uint8_t param) {
     antialias(512);
     antialias(512);
     break;
+    // jhhl
+      case wave_OddHarms:
+
+        for (uint16_t i=0;i<8192;i++) {
+          mainLut[i]=sinLut[i]*0.5;
+        }
+        // make em louder
+        /*
+        if (param&(1<<0)) addSine(3, 0.3333)
+        if (param&(1<<1)) addSine(5, 0.20)
+        if (param&(1<<2)) addSine(7, 0.1428)
+        if (param&(1<<3)) addSine(9, 0.1111)
+        if (param&(1<<4)) addSine(11, 0.0909)
+        if (param&(1<<5)) addSine(13, 0.0769)
+        if (param&(1<<6)) addSine(15, 0.0666)
+        */
+        // I am turning this into Gray code
+        param = (param>1) ^ param;
+        if (param&(1<<0)) addSine(3, 0.25)
+        if (param&(1<<1)) addSine(5, 0.25)
+        if (param&(1<<2)) addSine(7, 0.25)
+        if (param&(1<<3)) addSine(9, 0.25)
+        if (param&(1<<4)) addSine(11, 0.25)
+        if (param&(1<<5)) addSine(13, 0.25)
+        if (param&(1<<6)) addSine(15, 0.25)
+
+
+        goto skipAntiAliasing;
   }
   waveCheck()
   antialias(136);
