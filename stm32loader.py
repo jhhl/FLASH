@@ -21,6 +21,7 @@
 # You should have received a copy of the GNU General Public License
 # along with stm32loader; see the file COPYING3.  If not see
 # <http://www.gnu.org/licenses/>.
+# jhhl serial comes from pyserial
 
 import sys, getopt
 import serial
@@ -35,7 +36,8 @@ except:
 
 # Verbose level
 QUIET = 20
-
+# PORTFILENAME = 'COM7'
+PORTFILENAME = '/dev/tty.usbserial-H_Pi_20200422'
 # these come from AN2606
 chip_ids = {
     0x412: "STM32 Low-density",
@@ -61,8 +63,9 @@ class CmdException(Exception):
 
 class CommandInterface:
     extended_erase = 0
-
-    def open(self, aport='COM7', abaudrate=115200) :
+# mac will use: tty.usbserial-H_Pi_20200422
+# def open(self, aport='COM7', abaudrate=115200) :
+    def open(self, aport=PORTFILENAME, abaudrate=115200) :
         self.sp = serial.Serial(
             port=aport,
             baudrate=abaudrate,     # baudrate
@@ -71,16 +74,43 @@ class CommandInterface:
             stopbits=1,
             xonxoff=0,              # don't enable software flow control
             rtscts=0,               # don't enable RTS/CTS flow control
-            timeout=5               # set a timeout value, None for waiting forever
+            timeout=2               # set a timeout value, None for waiting forever
         )
+#        self.sp.close()
+#        time.sleep(2.0)
+#         #why didn't they try to open it???
+#        try: 
+#         self.sp.open()
+#        except Exception as e:
+#         print( "error opening serial port: "+str(e))
+#         sys.exit()
+
 
 
     def _wait_for_ack(self, info = ""):
+        """
+        0x79 is an OK ACK, 1F is a NOK ack
+        1 return is OK, mostly we just give raise an exception
+        """
+        TRIES = 3
+        ack = 1000
         try:
-            ack = bytearray(self.sp.read())[0]
+            while TRIES>0:
+                mdebug(10,"read attempt:"+str(4-TRIES))
+                ack_a = bytearray(self.sp.read())
+                mdebug(10,"after read:"+str(len(ack_a)))
+                if len(ack_a)>0:
+                  ack = ack_a[0]
+                  if ack >0x0:
+                      break
+                TRIES-=1
+            mdebug(10,"w_f_a: ran out of tries ")
+            raise CmdException("port keeps returning 0x0s")
         except:
-            raise CmdException("Can't read port or timeout")
+            print(str(sys.exc_info()[1]))
+            raise CmdException("Can't read port or timeout "+str(sys.exc_info()[1]))
         else:
+            mdebug(10,"w_f_a: ack array length: %d " % (len(ack_a)))
             if ack == 0x79:
                 # ACK
                 return 1
@@ -101,11 +131,20 @@ class CommandInterface:
 
     def initChip(self):
         # Set boot
+        mdebug(10,"initChip phase: setRTS")
         self.sp.setRTS(0)
+        mdebug(10,"initChip phase: reset")
         self.reset()
-
+        mdebug(10,"initChip phase: write 0x7F")
         self.sp.write(b"\x7F")       # Syncro
-        return self._wait_for_ack("Syncro")
+        mdebug(10,"initChip phase: wait for ack")
+        rc=1000
+        try:
+            rc = self._wait_for_ack("Syncro")
+        except:
+            mdebug(10,"error: wait returned: %d" % rc+' '+str(sys.exc_info()[1]))
+            raise CmdException("Serial ACK failed.")
+        return rc
 
     def releaseChip(self):
         self.sp.baudrate = 31250
@@ -304,7 +343,7 @@ class CommandInterface:
         if usepbar:
             widgets = ['Reading: ', Percentage(),', ', ETA(), ' ', Bar()]
             pbar = ProgressBar(widgets=widgets,maxval=lng, term_width=79).start()
-        
+
         while lng > 256:
             if usepbar:
                 pbar.update(pbar.maxval-lng)
@@ -326,7 +365,7 @@ class CommandInterface:
         if usepbar:
             widgets = ['Writing: ', Percentage(),' ', ETA(), ' ', Bar()]
             pbar = ProgressBar(widgets=widgets, maxval=lng, term_width=79).start()
-        
+
         offs = 0
         while lng > 256:
             if usepbar:
@@ -361,18 +400,18 @@ def usage():
     -v          Verify
     -r          Read
     -l length   Length of read
-    -p port     Serial port (default: COM7)
+    -p port     Serial port (default: %s)
     -b baud     Baud speed (default: 115200)
     -a addr     Target address
     -g addr     Address to start running at (0x08000000, usually)
 
     ./stm32loader.py -e -w -v example/main.bin
 
-    """ % sys.argv[0])
+    """ % (sys.argv[0],PORTFILENAME))
 
 
 if __name__ == "__main__":
-    
+
     # Import Psyco if available
     try:
         import psyco
@@ -382,7 +421,7 @@ if __name__ == "__main__":
         pass
 
     conf = {
-            'port': 'COM7',
+            'port': PORTFILENAME,
             'baud': 115200,
             'address': 0x08000000,
             'erase': 0,
@@ -441,6 +480,8 @@ if __name__ == "__main__":
             cmd.initChip()
         except:
             print("Can't init. Ensure that BOOT0 is enabled and reset device")
+            print(str(sys.exc_info()[1]))
+            sys.exit()
 
 
         bootversion = cmd.cmdGet()
@@ -486,4 +527,3 @@ if __name__ == "__main__":
 
     finally:
         cmd.releaseChip()
-

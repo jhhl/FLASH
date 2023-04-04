@@ -65,6 +65,7 @@ startup_stm32l432xx.s
 # binaries
 #######################################
 BINPATH = 
+# mac: arm-none-eabi-gcc
 PREFIX = arm-none-eabi-
 CC = $(PREFIX)gcc
 AS = $(PREFIX)gcc -x assembler-with-cpp
