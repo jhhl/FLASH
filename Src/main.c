@@ -543,7 +543,7 @@ void setWaveform(uint8_t id, uint8_t param) {
         if (param&(1<<6)) addSine(15, 0.0666)
         */
         // I am turning this into Gray code
-        param = (param>1) ^ param;
+        // param = (param>1) ^ param;
         if (param&(1<<0)) addSine(3, 0.25)
         if (param&(1<<1)) addSine(5, 0.25)
         if (param&(1<<2)) addSine(7, 0.25)
@@ -551,8 +551,29 @@ void setWaveform(uint8_t id, uint8_t param) {
         if (param&(1<<4)) addSine(11, 0.25)
         if (param&(1<<5)) addSine(13, 0.25)
         if (param&(1<<6)) addSine(15, 0.25)
-
-
+// so sue me, I'm normalizing.
+        float abs_maximum = 0.0;
+        for (uint16_t i=0;i<8192;i++)
+        {
+          if(mainLut[i]<0)
+          {
+            if ((- mainLut[i]) > abs_maximum)
+            {
+             abs_maximum = -mainLut[i];
+            }
+          }
+          else
+          {
+            if ((mainLut[i]) > abs_maximum)
+            {
+             abs_maximum = mainLut[i];
+            }
+          }
+        }
+        for (uint16_t i=0;i<8192;i++)
+        {
+          mainLut[i] = mainLut[i]/abs_maximum;
+        }
         goto skipAntiAliasing;
   }
   waveCheck()
@@ -1944,6 +1965,7 @@ void USART1_Init(void) {
   //NVIC_EnableIRQ(USART1_IRQn);
   LL_USART_Enable(USART1);
   LL_USART_EnableIT_RXNE(USART1);
+  // I might be able to enable transmission!
 
 }
 
