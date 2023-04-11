@@ -73,12 +73,12 @@ class CommandInterface:
             parity=serial.PARITY_EVEN,
             stopbits=1,
             xonxoff=0,              # don't enable software flow control
-            rtscts=0,               # don't enable RTS/CTS flow control
+            rtscts=0,               # don't enable RTS/CTS flow control or maybe do?
             timeout=2               # set a timeout value, None for waiting forever
         )
 #        self.sp.close()
 #        time.sleep(2.0)
-#         #why didn't they try to open it???
+#        # why didn't they try to open it???
 #        try: 
 #         self.sp.open()
 #        except Exception as e:
@@ -92,13 +92,14 @@ class CommandInterface:
         0x79 is an OK ACK, 1F is a NOK ack
         1 return is OK, mostly we just give raise an exception
         """
+        mdebug(10,"out_waiting: "+str(self.sp.out_waiting))
         TRIES = 3
         ack = 1000
         try:
             while TRIES>0:
                 mdebug(10,"read attempt:"+str(4-TRIES))
                 ack_a = bytearray(self.sp.read())
-                mdebug(10,"after read:"+str(len(ack_a)))
+                mdebug(10,"     after read:"+str(len(ack_a)))
                 if len(ack_a)>0:
                   ack = ack_a[0]
                   if ack >0x0:
@@ -131,13 +132,15 @@ class CommandInterface:
 
     def initChip(self):
         # Set boot
-        mdebug(10,"initChip phase: setRTS")
+        mdebug(10,"initChip phase: setRTS to 0 ")
         self.sp.setRTS(0)
         mdebug(10,"initChip phase: reset")
         self.reset()
+        mdebug(10,"initChip phase: setRTS to 1, currently "+str(self.sp.rts))
+        self.sp.setRTS(1)
         mdebug(10,"initChip phase: write 0x7F")
-        self.sp.write(b"\x7F")       # Syncro
-        mdebug(10,"initChip phase: wait for ack")
+        written = self.sp.write(b"\x7F")       # Syncro
+        mdebug(10,"initChip phase: wait for ack, written: " + str(written))
         rc=1000
         try:
             rc = self._wait_for_ack("Syncro")

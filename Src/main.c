@@ -194,6 +194,7 @@ enum {
 enum {
   cc_modulation = 1,
   cc_portamento = 5,
+  cc_volume = 7,
   cc_sustain = 64,
   cc_lfo_freq = 76,      // MMA Vibrato Rate
   cc_attack_rate = 73,   // MMA Attack Time
@@ -623,6 +624,15 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
       set_release_rate()
       break;
 
+    case cc_volume:
+      {
+        // try this cheap trick
+        // possibly: it's own parameter
+        outputGain = i==0 ? 1.0 : i*0.125;
+        set_attack_rate()
+        set_release_rate()
+      }
+      break;
     case cc_detune:{
         float detune= ((float)(i)/10160.0);
         detuneUp = 1.0 + detune;
