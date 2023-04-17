@@ -2,7 +2,8 @@
 
 command -v xxd >/dev/null || { echo "xxd not found"; exit 1; }
 
-VERSION="00000007" # hex
+# [fix.b][feature.b][release.h]
+VERSION="04010007" # hex
 
 if [ `git diff-index --quiet HEAD --` ]; then
   HASH=$(printf "0%s" $(git rev-parse --short HEAD))

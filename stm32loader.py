@@ -124,20 +124,31 @@ class CommandInterface:
                     raise CmdException("Unknown response. "+info+": "+hex(ack))
 
 
-    def reset(self):
+    def resetDTR(self):
         self.sp.setDTR(0)
         time.sleep(0.1)
         self.sp.setDTR(1)
         time.sleep(0.5)
 
+    def reset(self):
+        self.sp.close()
+        time.sleep(0.2)
+        self.sp.open()
+        time.sleep(0.2)
+
     def initChip(self):
         # Set boot
-        mdebug(10,"initChip phase: setRTS to 0 ")
-        self.sp.setRTS(0)
+        mdebug(10,"initChip phase: setRTS to 0 , currently "+str(self.sp.rts))
+        self.sp.setRTS(False)
+        time.sleep(0.3)
         mdebug(10,"initChip phase: reset")
         self.reset()
+        mdebug(10,"initChip phase: DTR = 1, currently "+str(self.sp.dtr))
+        self.sp.setDTR(True)
+        time.sleep(0.5)
         mdebug(10,"initChip phase: setRTS to 1, currently "+str(self.sp.rts))
-        self.sp.setRTS(1)
+        self.sp.setRTS(True)
+        time.sleep(0.3)
         mdebug(10,"initChip phase: write 0x7F")
         written = self.sp.write(b"\x7F")       # Syncro
         mdebug(10,"initChip phase: wait for ack, written: " + str(written))
@@ -161,7 +172,7 @@ class CommandInterface:
         self.sp.write(b'\x90\x48\x40')
 
         self.sp.setRTS(1)
-        self.reset()
+        self.resetDTR()
 
     def cmdGeneric(self, cmd):
         self.sp.write(bytearray([cmd]))

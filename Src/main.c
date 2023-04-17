@@ -53,6 +53,9 @@ float fm_attack = 2.0;
 
 float outputGain = 1.0;
 
+float generalVolumeLast = 1.0;
+float generalVolume = 1.0;
+
 uint8_t waveParam =0x0F;
 
 struct channel {
@@ -193,6 +196,7 @@ enum {
 
 enum {
   cc_modulation = 1,
+  cc_breath_control = 2,
   cc_portamento = 5,
   cc_volume = 7,
   cc_sustain = 64,
@@ -534,15 +538,6 @@ void setWaveform(uint8_t id, uint8_t param) {
           mainLut[i]=sinLut[i]*0.5;
         }
         // make em louder
-        /*
-        if (param&(1<<0)) addSine(3, 0.3333)
-        if (param&(1<<1)) addSine(5, 0.20)
-        if (param&(1<<2)) addSine(7, 0.1428)
-        if (param&(1<<3)) addSine(9, 0.1111)
-        if (param&(1<<4)) addSine(11, 0.0909)
-        if (param&(1<<5)) addSine(13, 0.0769)
-        if (param&(1<<6)) addSine(15, 0.0666)
-        */
         // I am turning this into Gray code
         // param = (param>1) ^ param;
         if (param&(1<<0)) addSine(3, 0.25)
@@ -586,7 +581,8 @@ skipAntiAliasing:
 
   if (id==targetWave && param==waveParam) targetWave|=0x80;
 }
-
+//fm_freq is freq_cc[0]*128, so 0..16384 in bunches of 256, but the second byte only goes up to .125 (1/8)
+// mostly useful when freq_cc[0] is 0
 uint8_t fm_freq_cc[] = {0,0}, attackrate_cc=0, releaserate_cc=0, fm_attack_cc=0;
 void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
 
@@ -624,15 +620,25 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
       set_release_rate()
       break;
 
-    case cc_volume:
-      {
-        // try this cheap trick
-        // possibly: it's own parameter
-        outputGain = i==0 ? 1.0 : i*0.125;
-        set_attack_rate()
-        set_release_rate()
-      }
+// these two are identical.grr.
+      case cc_breath_control:
+      // this might get 3x louder! but I ":"clip" it
+      // make it real loud to prove it is there!
+        generalVolume = (float)(i)/42.0;
+        // pretend the velocity never happened...?
+        // outputGain=1.0;
+        // set_attack_rate()
+        // set_release_rate()
       break;
+
+      case cc_volume:
+    // this might get 3x louder! but I ":"clip" it
+      generalVolume = (float)(i)/42.0;
+      // outputGain=1.0;
+      // set_attack_rate()
+      // set_release_rate()
+      break;
+
     case cc_detune:{
         float detune= ((float)(i)/10160.0);
         detuneUp = 1.0 + detune;
@@ -663,6 +669,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
     case cc_fm_decay_rate:
       fm_decay=1.0 - ((float)(i*i)/25400000);
       break;
+
     case cc_algo:
       {
         for (int i=POLYPHONY;i--;) oscillators[i].alive=0;
@@ -672,7 +679,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
         monoNoteTimer=254;
         squareSawSwitch=0;
         switch (i){
-          case algo_1_poly: default:
+          case algo_1_poly : default:
             doOscillator = &oscAlgo1;
             generateIntoBuffer = &generateIntoBufferFullPoly;
             noteOn = &noteOnFullPoly;
@@ -719,6 +726,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
             setStereo(1);
             break;
 
+// algo3 Saw does not have a duty cycle like the square does.
           case algo_3_mono:
             oscillators[0].phase=8192.0;
             squareSawSwitch = 1;
@@ -728,6 +736,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
             noteOff = &noteOffMonophonic;
             setStereo(1);
             break;
+
           case algo_3_poly:
             for (int i=POLYPHONY;i--;) {oscillators[i].phase=8192.0;}
             squareSawSwitch = 1;
@@ -752,6 +761,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
             noteOff = &noteOffDualOsc;
             setStereo(1);
             break;
+
           case algo_2_quad:
             doOscillatorStereo = &oscAlgo2Quad;
             generateIntoBuffer = &generateIntoBufferDualOsc;
@@ -826,6 +836,9 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
       oscillators[0].amplitude=0;
       monoNoteNow=monoNoteEnd=monoNoteReleaseEnd=0;
       monoNoteTimer=254;
+      // reset this.
+      generalVolumeLast = 1.0;
+      generalVolume = 1.0;
     } break;
 
     case cc_program_change_from_cc:
@@ -904,6 +917,9 @@ void loadPatch(uint8_t p){
 
   for (uint8_t i=1;i<64;i++)
     parameterChange(0, paramMap[i], bPatches[p][i]);
+//  loading a patch puts the channel volume back up to 1.0
+  for (uint8_t chan=0;chan<16;chan++)
+          channels[chan].volume = 1.0;
 }
 
 inline void trigger_int_envelope(struct oscillator* osc, uint8_t vel, uint8_t n){
@@ -951,8 +967,6 @@ void noteOnFullPoly(uint8_t n, uint8_t vel, uint8_t chan) {
   oscillators[i].released = 0;
   oscillators[i].sustained = 0;
   oscillators[i].velocity=vel * outputGain;
-
-
 
 }
 #pragma GCC diagnostic pop
@@ -1185,9 +1199,14 @@ void USART1_IRQHandler(void) {
     if (bytenumber == 1) { // Check two-byte messages
       switch (status&0xF0) {
 
-        case 0xD0: //After-touch
-          if (i>=channels[chan].mod)
-            channels[chan].lfo_depth = (float)(i*8);
+        case 0xD0: //channel After-touch
+        // we ignore the channel, actually
+        // normallit, it there's no
+        // make this real loud to prove it was received!
+          generalVolume = (float)i/42.0;
+          // if (i>=channels[chan].mod)
+          //   channels[chan].lfo_depth = (float)(i*8);
+          status = 0;
           break;
 
         case 0xC0: //Program Change
@@ -1221,6 +1240,10 @@ void USART1_IRQHandler(void) {
 
         case 0xB0: // Continuous controller
           parameterChange(chan, bytetwo, i);
+          break;
+          
+        case 0xA0: // polyohonic pressure!
+          // this will be something channel/note specific
           break;
       }
 
@@ -1387,7 +1410,7 @@ void oscAlgo1(struct oscillator* osc, uint16_t* buf){
     osc->phase += f  + sinLut[(int)(osc->fm_phase)]*osc->fm_amplitude *f;
     phase_wrap(osc->phase)
 
-    buf[i] += mainLut[(int)(osc->phase)] * osc->amplitude;
+    buf[i] += mainLut[(int)(osc->phase)] * (osc->amplitude);
 
   }
 
@@ -1413,7 +1436,7 @@ void oscAlgo2(struct oscillator* osc, uint16_t* buf){
     osc->fm_phase = mainLut[(int)(osc->phase)] * osc->fm_amplitude *4096.0;
     phase_wrap(osc->fm_phase)
 
-    buf[i] += sinLut[(int)(osc->fm_phase)] * osc->amplitude;
+    buf[i] += sinLut[(int)(osc->fm_phase)] * osc->amplitude ;
 
   }
 
@@ -1444,8 +1467,8 @@ void oscAlgo1Stereo(struct oscillator* osc, struct oscillator* osc2, uint16_t* b
     phase_wrap(osc->phase)
     phase_wrap(osc2->phase)
 
-    buf[i] += mainLut[(int)(osc->phase)] * osc->amplitude;
-    buf2[i]+= mainLut[(int)(osc2->phase)]* osc->amplitude;
+    buf[i] += mainLut[(int)(osc->phase)] * osc->amplitude ;
+    buf2[i]+= mainLut[(int)(osc2->phase)]* osc->amplitude ;
 
   }
 
@@ -1478,8 +1501,8 @@ void oscAlgo2Stereo(struct oscillator* osc, struct oscillator* osc2, uint16_t* b
     phase_wrap(osc->fm_phase)
     phase_wrap(osc2->fm_phase)
 
-    buf[i] += sinLut[(int)( osc->fm_phase)] * osc->amplitude;
-    buf2[i]+= sinLut[(int)(osc2->fm_phase)] * osc->amplitude;
+    buf[i] += sinLut[(int)( osc->fm_phase)] * osc->amplitude ;
+    buf2[i]+= sinLut[(int)(osc2->fm_phase)] * osc->amplitude ;
 
   }
 
@@ -1518,8 +1541,8 @@ void oscAlgo1Quad(struct oscillator* osc, struct oscillator* osc2, uint16_t* buf
     phase_wrap(osc2->lfo_phase)
     phase_wrap(osc2->fm_phase)
 
-    buf[i] += (mainLut[(int)(osc->phase)] + mainLut[(int)(osc2->lfo_phase)])* osc->amplitude;
-    buf2[i]+= (mainLut[(int)(osc2->phase)]+ mainLut[(int)(osc2->fm_phase)]) * osc->amplitude;
+    buf[i] += (mainLut[(int)(osc->phase)] + mainLut[(int)(osc2->lfo_phase)])* osc->amplitude ;
+    buf2[i]+= (mainLut[(int)(osc2->phase)]+ mainLut[(int)(osc2->fm_phase)]) * osc->amplitude ;
 
   }
 
@@ -1551,11 +1574,11 @@ void oscAlgo2Quad(struct oscillator* osc, struct oscillator* osc2, uint16_t* buf
 
     osc->fm_phase  = (mainLut[(int)(osc->phase)] + mainLut[(int)(osc2->lfo_phase)])* osc->fm_amplitude *4096.0;
     phase_wrap(osc->fm_phase)
-    buf[i] += sinLut[(int)(osc->fm_phase)] * osc->amplitude;
+    buf[i] += sinLut[(int)(osc->fm_phase)] * (osc->amplitude);
 
     osc->fm_phase = (mainLut[(int)(osc2->phase)]+ mainLut[(int)(osc2->fm_phase)]) * osc->fm_amplitude *4096.0;
     phase_wrap(osc->fm_phase)
-    buf2[i]+= sinLut[(int)(osc->fm_phase)] * osc->amplitude;
+    buf2[i]+= sinLut[(int)(osc->fm_phase)] * (osc->amplitude);
 
   }
 
@@ -1594,14 +1617,15 @@ void oscAlgo1Poly4(struct oscillator* osc, struct oscillator* osc2, struct oscil
     phase_wrap(osc3->phase)
     phase_wrap(osc4->phase)
 
-    buf[i] += (mainLut[(int)(osc->phase)] + mainLut[(int)(osc3->phase)])* osc->amplitude;
-    buf2[i]+= (mainLut[(int)(osc2->phase)]+ mainLut[(int)(osc4->phase)])* osc->amplitude;
+    buf[i] += (mainLut[(int)(osc->phase)] + mainLut[(int)(osc3->phase)])* (osc->amplitude);
+    buf2[i]+= (mainLut[(int)(osc2->phase)]+ mainLut[(int)(osc4->phase)])* (osc->amplitude);
 
   }
 
   graceful_theft(osc);
 }
 
+// because it's monophonic, it builds the 2048 (0 if signed) right in.
 
 void algoMonophonic1(float f, uint16_t* buf, uint16_t* buf2) {
 
@@ -1627,8 +1651,8 @@ void algoMonophonic1(float f, uint16_t* buf, uint16_t* buf2) {
     phase_wrap(osc->phase)
     phase_wrap(osc2->phase)
 
-    buf[i] = 2048+mainLut[(int)(osc->phase)] * osc->amplitude;
-    buf2[i]= 2048+mainLut[(int)(osc2->phase)]* osc->amplitude;
+    buf[i] = 2048+mainLut[(int)(osc->phase)] * (osc->amplitude);
+    buf2[i]= 2048+mainLut[(int)(osc2->phase)]* (osc->amplitude);
   }
 
 }
@@ -1657,8 +1681,8 @@ void algoMonophonic2(float f, uint16_t* buf, uint16_t* buf2) {
     phase_wrap(osc->fm_phase)
     phase_wrap(osc2->fm_phase)
 
-    buf[i]  = 2048+sinLut[(int)( osc->fm_phase)] * osc->amplitude;
-    buf2[i] = 2048+sinLut[(int)(osc2->fm_phase)] * osc->amplitude;
+    buf[i]  = 2048+sinLut[(int)( osc->fm_phase)] * (osc->amplitude);
+    buf2[i] = 2048+sinLut[(int)(osc2->fm_phase)] * (osc->amplitude);
   }
 
 }
@@ -1781,7 +1805,15 @@ inline void blepSawRecalc(struct oscillator* osc, uint8_t* state, float f, float
   #include "algo3_mono.h"
   #include "algo3_poly16.h"
 #undef SAW
-
+// doingthe volume here instead of at OSC gen time
+// means fewer multiplies
+// although the thing needs to be converted from 2048 offset shorts to float and back.
+//  integer calc would also work, but it would maybe not sound as good.
+//  turn into signed int, subtract 2048, multiply by vol that is 0..127, shift >>7, clip, add 2048 back
+//  I'm clipping in case it get's really loud.
+// too expensive!
+//#define VOLUMATE(x) (2048+fmax(-2047,fmin(2047,x*generalVolumeLast)))
+#define VOLUMATE(x) (2048+((x)*generalVolumeLast))
 
 void generateIntoBufferFullPoly(uint16_t* buf, uint16_t* buf2){
 
@@ -1791,6 +1823,17 @@ void generateIntoBufferFullPoly(uint16_t* buf, uint16_t* buf2){
     if (oscillators[i].alive)
       doOscillator(&oscillators[i], buf);
   }
+  // treating cc07 as general volume...
+  float gVolumeDiff = (generalVolume-generalVolumeLast)/BUFFERSIZE;
+  for (uint16_t i = 0; i<BUFFERSIZE; i++) {
+    float sbuf = ((int16_t)buf[i])-2048;
+    // clip it
+    buf[i]=VOLUMATE(sbuf);
+    generalVolumeLast+=gVolumeDiff;
+  }
+  // should not need this, but whatever:
+  generalVolumeLast = generalVolume;
+
 }
 
 void generateIntoBufferDualOsc(uint16_t* buf, uint16_t* buf2){
@@ -1801,6 +1844,19 @@ void generateIntoBufferDualOsc(uint16_t* buf, uint16_t* buf2){
     if (oscillators[i].alive)
       doOscillatorStereo(&oscillators[i], &oscillators[i+1], buf, buf2);
   }
+  // treating cc07 as general volume...
+  float gVolumeDiff = (generalVolume-generalVolumeLast)/BUFFERSIZE;
+  for (uint16_t i = 0; i<BUFFERSIZE; i++) {
+    float sbuf = ((int16_t)(buf[i]-2048));
+    float sbuf2 = ((int16_t)(buf2[i]-2048));
+
+    buf[i]=VOLUMATE(sbuf);
+    buf2[i]=VOLUMATE(sbuf2);
+    generalVolumeLast+=gVolumeDiff;
+  }
+  // should not need this, but whatever:
+  generalVolumeLast = generalVolume;
+
 }
 
 void generateIntoBufferMonophonic(uint16_t* buf, uint16_t* buf2){
@@ -1821,7 +1877,18 @@ void generateIntoBufferMonophonic(uint16_t* buf, uint16_t* buf2){
   }
 
   monophonicAlgo(f, buf, buf2);
+  // treating cc07 as general volume...
+  float gVolumeDiff = (generalVolume-generalVolumeLast)/BUFFERSIZE;
+  for (uint16_t i = 0; i<BUFFERSIZE; i++) {
+    float sbuf = (int16_t)(buf[i]-2048);
+    float sbuf2 = (int16_t)(buf2[i]-2048);
 
+    buf[i]=VOLUMATE(sbuf);
+    buf2[i]=VOLUMATE(sbuf2);
+    generalVolumeLast+=gVolumeDiff;
+  }
+  // should not need this, but whatever:
+  generalVolumeLast = generalVolume;
 }
 
 void generateIntoBufferPoly4(uint16_t* buf, uint16_t* buf2){
@@ -1832,7 +1899,21 @@ void generateIntoBufferPoly4(uint16_t* buf, uint16_t* buf2){
     if (oscillators[i].alive)
       doOscillatorPoly4(&oscillators[i], &oscillators[i+1], &oscillators[i+2], &oscillators[i+3], buf, buf2);
   }
+  // treating cc07 as general volume...
+  float gVolumeDiff = (generalVolume-generalVolumeLast)/BUFFERSIZE;
+  for (uint16_t i = 0; i<BUFFERSIZE; i++) {
+    float sbuf = ((int16_t)(buf[i]-2048));
+    float sbuf2 = ((int16_t)(buf2[i]-2048));
+
+    buf[i]=VOLUMATE(sbuf);
+    buf2[i]=VOLUMATE(sbuf2);
+    generalVolumeLast+=gVolumeDiff;
+  }
+  // should not need this, but whatever:
+  generalVolumeLast = generalVolume;
 }
+
+// how it actually works: interrupts deliver buffers to the DAC
 
 void DMA1_Channel3_IRQHandler(void)
 {
@@ -1975,10 +2056,8 @@ void USART1_Init(void) {
   //NVIC_EnableIRQ(USART1_IRQn);
   LL_USART_Enable(USART1);
   LL_USART_EnableIT_RXNE(USART1);
-  // I might be able to enable transmission!
 
 }
-
 
 void TIM6_Config(void)
 {
