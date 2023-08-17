@@ -235,9 +235,9 @@ void setStereo(int stereo){
   // if (stereo == previousState) return;
   // previousState = stereo;
 
-  // Completely stop and reinit the timer, otherwise there is a risk of 
+  // Completely stop and reinit the timer, otherwise there is a risk of
   // desyncing and missing the first/last sample in each buffer
-  TIM6_Config(); 
+  TIM6_Config();
 
   if (HAL_DAC_Stop_DMA(&DacHandle, DAC_CHANNEL_1) != HAL_OK)
     Error_Handler();
@@ -250,8 +250,8 @@ void setStereo(int stereo){
     Error_Handler();
   if (HAL_DAC_ConfigChannel(&DacHandle, &sConfig, DAC_CHANNEL_2) != HAL_OK)
     Error_Handler();
-  if (HAL_DAC_Start_DMA(&DacHandle, DAC_CHANNEL_2, 
-        stereo ? ((uint32_t *)buffer2) : ((uint32_t *)buffer), 
+  if (HAL_DAC_Start_DMA(&DacHandle, DAC_CHANNEL_2,
+        stereo ? ((uint32_t *)buffer2) : ((uint32_t *)buffer),
         BUFFERSIZE*2, DAC_ALIGN_12B_R) != HAL_OK)
     Error_Handler();
 
@@ -360,7 +360,7 @@ void setWaveform(uint8_t id, uint8_t param) {
     }
     break;
   case wave_SoftSquare:
-    { 
+    {
       uint16_t i=0;
       while (i<512) {
         mainLut[i]= (i/512.0) -0.5;
@@ -718,7 +718,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
 
 
 
-    case cc_sustain: 
+    case cc_sustain:
       channels[chan].sustain = (i>63);
       if (channels[chan].sustain == 0) {//pedal released
         if (noteOff == &noteOffMonophonic) {
@@ -768,7 +768,7 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
     case 101: channels[chan].RPNstack[0]=i; break;
     case 100: channels[chan].RPNstack[1]=i; break;
     case 38:  channels[chan].RPNstack[3]=i; break; //not used yet
-    case 6:   channels[chan].RPNstack[2]=i; 
+    case 6:   channels[chan].RPNstack[2]=i;
       if (channels[chan].RPNstack[0]==0 && channels[chan].RPNstack[1]==0) {//Pitch bend sensitivity
 
         // For now, only allow changing bend range in 12ET mode
@@ -824,7 +824,7 @@ void loadPatch(uint8_t p){
     cc_waveform,
     cc_wave_param,
     cc_lfo_freq,
-    cc_detune, 
+    cc_detune,
     cc_arpeg_speed,
     cc_portamento,
     cc_output_gain,
@@ -883,7 +883,7 @@ void noteOnFullPoly(uint8_t n, uint8_t vel, uint8_t chan) {
   oscillators[i].sustained = 0;
   oscillators[i].velocity=vel * outputGain;
 
-  
+
 
 }
 #pragma GCC diagnostic pop
@@ -952,10 +952,10 @@ void noteOffDualOsc(uint8_t n, uint8_t chan) {
 // kill it
 
   for (uint8_t i=0; i<POLYPHONY; i+=2) {
-    if ( oscillators[i].alive 
-     && !oscillators[i].released 
-     && oscillators[i].notenumber==n 
-     && oscillators[i].channel==chan 
+    if ( oscillators[i].alive
+     && !oscillators[i].released
+     && oscillators[i].notenumber==n
+     && oscillators[i].channel==chan
      && !oscillators[i].sustained
      ){
       if (channels[chan].sustain) {
@@ -1073,10 +1073,10 @@ void noteOnPoly4(uint8_t n, uint8_t vel, uint8_t chan) {
 void noteOffPoly4(uint8_t n, uint8_t chan) {
 // Identical to dual osc except for loop increment
   for (uint8_t i=0; i<POLYPHONY; i+=4) {
-    if ( oscillators[i].alive 
-     && !oscillators[i].released 
-     && oscillators[i].notenumber==n 
-     && oscillators[i].channel==chan 
+    if ( oscillators[i].alive
+     && !oscillators[i].released
+     && oscillators[i].notenumber==n
+     && oscillators[i].channel==chan
      && !oscillators[i].sustained
      ){
       if (channels[chan].sustain) {
@@ -1807,7 +1807,7 @@ int main(void) {
 
   if (HAL_DAC_Init(&DacHandle) != HAL_OK)
     Error_Handler();
-  
+
   sConfig.DAC_Trigger = DAC_TRIGGER_T6_TRGO;
   sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
 
@@ -1816,21 +1816,22 @@ int main(void) {
 
   if (HAL_DAC_Start_DMA(&DacHandle, DAC_CHANNEL_1, (uint32_t *)buffer, BUFFERSIZE*2, DAC_ALIGN_12B_R) != HAL_OK)
     Error_Handler();
-  
+
   if (HAL_DAC_ConfigChannel(&DacHandle, &sConfig, DAC_CHANNEL_2) != HAL_OK)
     Error_Handler();
 
   if (HAL_DAC_Start_DMA(&DacHandle, DAC_CHANNEL_2, (uint32_t *)buffer, BUFFERSIZE*2, DAC_ALIGN_12B_R) != HAL_OK)
     Error_Handler();
-  
+
 
   for (uint8_t i=16;i--;) {
     channels[i].pbSensitivity = DEFAULT_PB_RANGE;
     parameterChange(i, cc_per_channel_tuning, synthConfig.startupTuning[i]);
 
   }
-  
-  loadPatch(0);
+
+  // now load the UTE preset patch!
+  loadPatch(synthConfig.startupPatch);
 
   while (1) {
     setWaveform(targetWave, waveParam);
@@ -1869,12 +1870,12 @@ void SystemClock_Config(void)
 
   if(HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
     Error_Handler();
-  
+
   RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;  
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;  
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
   if(HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_4) != HAL_OK)
     Error_Handler();
 
@@ -1946,4 +1947,3 @@ static void Error_Handler(void)
     while(1){}
   #endif
 }
-
