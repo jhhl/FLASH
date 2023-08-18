@@ -656,7 +656,10 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
             setStereo(1);
             break;
 
-          case algo_3_mono:
+            case algo_3_mono:
+              // lets make sure Mono's overuse of Osc slots is nice and clean.
+              // it's actually just [6] that I think needs clearing.
+            for(int i = 0;i<POLYPHONY;i++){oscillators[i].fm_amplitude = 0.0;};
             oscillators[0].phase=8192.0;
             squareSawSwitch = 1;
             monophonicAlgo = (waveParam==0) ? &algoMonophonic3_saw : &algoMonophonic3_square;

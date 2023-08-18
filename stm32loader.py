@@ -21,11 +21,15 @@
 # You should have received a copy of the GNU General Public License
 # along with stm32loader; see the file COPYING3.  If not see
 # <http://www.gnu.org/licenses/>.
+# jhhl serial comes from pyserial
 
 import sys, getopt
 import serial
 import time
 from functools import reduce
+import math
+import datetime
+import struct
 
 try:
     from progressbar import *
@@ -35,7 +39,8 @@ except:
 
 # Verbose level
 QUIET = 20
-
+# PORTFILENAME = 'COM7'
+PORTFILENAME = '/dev/tty.usbserial-H_Pi_20200422'
 # these come from AN2606
 chip_ids = {
     0x412: "STM32 Low-density",
@@ -61,8 +66,9 @@ class CmdException(Exception):
 
 class CommandInterface:
     extended_erase = 0
-
-    def open(self, aport='COM7', abaudrate=115200) :
+# mac will use: tty.usbserial-H_Pi_20200422
+# def open(self, aport='COM7', abaudrate=115200) :
+    def open(self, aport=PORTFILENAME, abaudrate=115200) :
         self.sp = serial.Serial(
             port=aport,
             baudrate=abaudrate,     # baudrate
@@ -71,16 +77,42 @@ class CommandInterface:
             stopbits=1,
             xonxoff=0,              # don't enable software flow control
             rtscts=0,               # don't enable RTS/CTS flow control
-            timeout=5               # set a timeout value, None for waiting forever
+            timeout=2               # set a timeout value, None for waiting forever
         )
+#        self.sp.close()
+#        time.sleep(2.0)
+#         #why didn't they try to open it???
+#        try:
+#         self.sp.open()
+#        except Exception as e:
+#         print( "error opening serial port: "+str(e))
+#         sys.exit()
+
 
 
     def _wait_for_ack(self, info = ""):
+        """
+        0x79 is an OK ACK, 1F is a NOK ack
+        1 return is OK, mostly we just give raise an exception
+        """
+        TRIES = 3
+        ack = 1000
         try:
-            ack = bytearray(self.sp.read())[0]
+            while TRIES>0:
+                #mdebug(10,"read attempt:"+str(4-TRIES))
+                ack_a = bytearray(self.sp.read())
+                #mdebug(10,"after read:"+str(len(ack_a)))
+                if len(ack_a)>0:
+                  ack = ack_a[0]
+                  if ack >0x0:
+                     #mdebug(10,"Ack actually returned: %s" % hex(ack))
+                     TRIES=0
+                TRIES-=1
         except:
-            raise CmdException("Can't read port or timeout")
+            print(str(sys.exc_info()[1]))
+            raise CmdException("Can't read port or timeout "+str(sys.exc_info()[1]))
         else:
+            #mdebug(10,"w_f_a: ack array length: %d " % (len(ack_a)))
             if ack == 0x79:
                 # ACK
                 return 1
@@ -93,33 +125,78 @@ class CommandInterface:
                     raise CmdException("Unknown response. "+info+": "+hex(ack))
 
 
-    def reset(self):
+    def reset_DTR_True(self):
+        # ends with DTR high
+        self.sp.reset_input_buffer()
+        time.sleep(0.5)
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
         self.sp.setDTR(0)
         time.sleep(0.1)
         self.sp.setDTR(1)
         time.sleep(0.5)
 
+    def reset_DTR_False(self):
+        # ends with DTR high
+        self.sp.reset_input_buffer()
+        time.sleep(0.5)
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
+        self.sp.setDTR(1)
+        time.sleep(0.1)
+        self.sp.setDTR(0)
+        time.sleep(0.5)
+
+    def AAH_MIDI(self):
+        self.sp.setRTS(False)
+        time.sleep(0.5)
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
+        self.sp.setDTR(True)
+        time.sleep(0.5)
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
+        self.sp.setRTS(True)
+        time.sleep(0.5)
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
+        self.sp.baudrate = 31250
+        self.sp.reset_output_buffer()
+        time.sleep(0.5)
+
+
     def initChip(self):
         # Set boot
-        self.sp.setRTS(0)
-        self.reset()
-
+        mdebug(10,"initChip phase: setRTS")
+        self.sp.setRTS(True)
+        mdebug(10,"initChip phase: reset")
+        self.reset_DTR_False()
+        mdebug(10,"initChip phase: write 0x7F")
         self.sp.write(b"\x7F")       # Syncro
-        return self._wait_for_ack("Syncro")
+        mdebug(10,"initChip phase: wait for ack")
+        rc=1000
+        try:
+            rc = self._wait_for_ack("Syncro")
+        except:
+            mdebug(10,"error: wait returned: %d" % rc+' '+str(sys.exc_info()[1]))
+            raise CmdException("Serial ACK failed.")
+        return rc
 
     def releaseChip(self):
+        self.AAH_MIDI()
+        # definitely plays these notes
         self.sp.baudrate = 31250
         time.sleep(0.3)
         self.sp.write(b'\x90\x3C\x40')
-        time.sleep(0.5)
-        self.sp.write(b'\x90\x40\x40')
-        time.sleep(0.5)
-        self.sp.write(b'\x90\x43\x40')
-        time.sleep(0.5)
-        self.sp.write(b'\x90\x48\x40')
-
-        self.sp.setRTS(1)
-        self.reset()
+        time.sleep(0.1)
+        self.sp.write(b'\x90\x3C\x00\x90\x40\x40')
+        time.sleep(0.1)
+        self.sp.write(b'\x90\x40\x00\x90\x43\x40')
+        time.sleep(0.1)
+        self.sp.write(b'\x90\x43\x00\x90\x48\x40')
+        time.sleep(0.1)
+        self.sp.write(b'\x90\x48\x00')
+        time.sleep(0.1)
 
     def cmdGeneric(self, cmd):
         self.sp.write(bytearray([cmd]))
@@ -175,7 +252,7 @@ class CommandInterface:
     def cmdReadMemory(self, addr, lng):
         assert(lng <= 256)
         if self.cmdGeneric(0x11):
-            mdebug(10, "*** ReadMemory command")
+            mdebug(10, "*** ReadMemory command: len: "+str(lng))
             self.sp.write(self._encode_addr(addr))
             self._wait_for_ack("0x11 address failed")
             N = (lng - 1) & 0xFF
@@ -248,7 +325,7 @@ class CommandInterface:
             self.sp.write(b'\x00')
             tmp = self.sp.timeout
             self.sp.timeout = 30
-            print("Extended erase (0x44), this can take ten seconds or more")
+            print("Extended erase (0x44), this can take some time")
             self._wait_for_ack("0x44 erasing failed")
             self.sp.timeout = tmp
             mdebug(10, "    Extended Erase memory done")
@@ -304,7 +381,7 @@ class CommandInterface:
         if usepbar:
             widgets = ['Reading: ', Percentage(),', ', ETA(), ' ', Bar()]
             pbar = ProgressBar(widgets=widgets,maxval=lng, term_width=79).start()
-        
+
         while lng > 256:
             if usepbar:
                 pbar.update(pbar.maxval-lng)
@@ -326,7 +403,7 @@ class CommandInterface:
         if usepbar:
             widgets = ['Writing: ', Percentage(),' ', ETA(), ' ', Bar()]
             pbar = ProgressBar(widgets=widgets, maxval=lng, term_width=79).start()
-        
+
         offs = 0
         while lng > 256:
             if usepbar:
@@ -352,7 +429,7 @@ class CommandInterface:
 
 
 def usage():
-    print("""Usage: %s [-hqVewvr] [-l length] [-p port] [-b baud] [-a addr] [-g addr] [file.bin]
+    print("""Usage: %s [-hqVewvrF] [-l length] [-p port] [-b baud] [-a addr] [-g addr] [file.bin]
     -h          This help
     -q          Quiet
     -V          Verbose
@@ -361,18 +438,19 @@ def usage():
     -v          Verify
     -r          Read
     -l length   Length of read
-    -p port     Serial port (default: COM7)
+    -p port     Serial port (default: %s)
     -b baud     Baud speed (default: 115200)
     -a addr     Target address
     -g addr     Address to start running at (0x08000000, usually)
+    -F          FLASH's version and comp date
 
     ./stm32loader.py -e -w -v example/main.bin
 
-    """ % sys.argv[0])
+    """ % (sys.argv[0],PORTFILENAME))
 
 
 if __name__ == "__main__":
-    
+
     # Import Psyco if available
     try:
         import psyco
@@ -382,7 +460,7 @@ if __name__ == "__main__":
         pass
 
     conf = {
-            'port': 'COM7',
+            'port': PORTFILENAME,
             'baud': 115200,
             'address': 0x08000000,
             'erase': 0,
@@ -390,12 +468,13 @@ if __name__ == "__main__":
             'verify': 0,
             'read': 0,
             'go_addr':-1,
+            'FLASHversion': 0
         }
 
 # http://www.python.org/doc/2.5.2/lib/module-getopt.html
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:], "hqVewvrp:b:a:l:g:")
+        opts, args = getopt.getopt(sys.argv[1:], "hqVewvrp:b:a:l:g:F")
     except getopt.GetoptError as err:
         # print help information and exit:
         print(str(err)) # will print something like "option -a not recognized"
@@ -430,6 +509,8 @@ if __name__ == "__main__":
             conf['go_addr'] = eval(a)
         elif o == '-l':
             conf['len'] = eval(a)
+        elif o == '-F':
+            conf['FLASHversion'] = 1
         else:
             assert False, "unhandled option"
 
@@ -441,6 +522,8 @@ if __name__ == "__main__":
             cmd.initChip()
         except:
             print("Can't init. Ensure that BOOT0 is enabled and reset device")
+            print(str(sys.exc_info()[1]))
+            sys.exit()
 
 
         bootversion = cmd.cmdGet()
@@ -466,6 +549,7 @@ if __name__ == "__main__":
             cmd.cmdGo(0x8000000)
 
         if conf['verify']:
+            print("VERIFY: read "+str(len(data))+" sbytes  from: "+hex(conf['address']))
             verify = cmd.readMemory(conf['address'], len(data))
             if(data == verify):
                 print("Verification OK")
@@ -477,6 +561,7 @@ if __name__ == "__main__":
                         print(hex(i) + ': ' + hex(data[i]) + ' vs ' + hex(verify[i]))
 
         if not conf['write'] and conf['read']:
+            mdebug(10,"reading :"+hex(conf['address'])+" into: "+args[0])
             rdata = cmd.readMemory(conf['address'], conf['len'])
             with open(args[0], 'wb') as out_file:
                 out_file.write(rdata)
@@ -484,6 +569,19 @@ if __name__ == "__main__":
         if conf['go_addr'] != -1:
             cmd.cmdGo(conf['go_addr'])
 
+        if conf['FLASHversion']:
+            print("Getting FLASH's version info")
+            bf = cmd.readMemory(conf['address']+0x1c, 8)
+            # for ix in range(8):
+            #    print(ix,bf[ix],hex(bf[ix]))
+            # read version
+            bug_fix_rel = bf[0]
+            feature_rel  = bf[1]
+            major_rel    = (bf[2]<<8)+bf[3]
+            # big or litte end?
+            date_rel   = (bf[4]<<24) + (bf[5]<<16) + (bf[6]<<8) +bf[7]
+            print("%d.%d.%d %s" % (major_rel, feature_rel, bug_fix_rel, datetime.datetime.fromtimestamp(date_rel).isoformat()))
+
+
     finally:
         cmd.releaseChip()
-
