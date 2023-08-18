@@ -213,8 +213,9 @@ enum {
   cc_all_notes_off = 123,
 
   cc_per_channel_tuning = 3,
-  cc_all_channels_tuning = 9
+  cc_all_channels_tuning = 9,
   // 6, 38, 100, 101 RPN stuff
+  cc_program_change_from_cc = 119
 };
 
 #define phase_incr(x, y) \
@@ -766,7 +767,15 @@ void parameterChange(uint8_t chan, uint8_t cc, uint8_t i){
       oscillators[0].amplitude=0;
       monoNoteNow=monoNoteEnd=monoNoteReleaseEnd=0;
       monoNoteTimer=254;
-    } break;
+    }
+    break;
+
+    case cc_program_change_from_cc:
+    {
+      uint8_t patch = i;
+      loadPatch(patch);
+    }
+    break;
 
     case 101: channels[chan].RPNstack[0]=i; break;
     case 100: channels[chan].RPNstack[1]=i; break;
