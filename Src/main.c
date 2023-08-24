@@ -24,7 +24,7 @@ void SystemClock_Config(void);
 static void TIM6_Config(void);
 static void USART1_Init(void);
 static void Error_Handler(void);
-
+void loadPatch(uint8_t p);
 
 #define BUFFERSIZE 256
 #define POLYPHONY 16

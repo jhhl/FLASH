@@ -1,16 +1,15 @@
 
 __attribute__((section(".Config"))) volatile struct {
 
-  uint8_t channel;
-  uint8_t somethingelse[512-16-2];
-  uint8_t startupPatch;
-  uint8_t startupTuning[16];
-
+  uint8_t channel;                  // 0x000000000803bc00
+  uint8_t startupPatch;             // 0x000000000803bc01
+  uint8_t somethingelse[512-16-2];  // 0x000000000803bc02
+  uint8_t startupTuning[16];        // 0x000000000803bdf0
 } synthConfig = {
 
   .channel = 255,
-  .somethingelse = {0},
   .startupPatch = 0,
+  .somethingelse = {0},
   .startupTuning = {0}
 };
 
